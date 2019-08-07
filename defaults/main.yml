@@ -1,0 +1,3 @@
+---
+leap_timeout: 14400
+leap_retry_interval: 15

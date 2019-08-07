@@ -1,0 +1,62 @@
+---
+- name: Assert if operating system is not RHEL
+  assert:
+    that:
+      - "ansible_distribution == 'RedHat'"
+    msg: "The distribution must be Red Hat Enterprise Linux. Quitting."
+
+- name: Assert if RHEL version is 7.6
+  assert:
+    that:
+      - "ansible_distribution_version == '7.6'"
+    msg: "The distribution version must be 7.6. Quitting."
+
+- name: Look for RHEL Server variant
+  lineinfile:
+    path: /etc/os-release
+    line: 'VARIANT="Server"'
+    state: present
+  check_mode: yes
+  register: variant_is_not_server
+
+- name: Assert if RHEL variant is Server
+  assert:
+    that:
+      - "variant_is_not_server is not changed"
+    msg: "The distribution variant must be 'Server'. Quitting."
+
+- name: Assert if architecture is Intel 64
+  assert:
+    that:
+      - "ansible_architecture == 'x86_64'"
+    msg: "The architecture must be Intel 64 (x86_64). Quitting."
+
+- name: Get /boot mount point information
+  set_fact:
+    boot_mount: "{{ mount }}"
+  when:
+    - "mount.mount == '/boot'"
+  loop: "{{ ansible_mounts }}"
+  loop_control:
+    loop_var: mount
+
+- debug:
+    var: boot_mount
+
+- name: Assert if /boot has 100MB of free space
+  assert:
+    that:
+      - "boot_mount.size_available >= 104857600"
+    msg: "The /boot partition must have 100MB of free space available. Quitting."
+
+- name: Check subscription status
+  command: subscription-manager status
+  ignore_errors: yes
+  changed_when: no
+  register: subscription_status
+
+- name: Assert if system is registered RH CDN or Satellite
+  assert:
+    that:
+      - "subscription_status.rc == 0"
+    msg: "The system is not registered to Red Hat CDN or Red Hat Satellite. Quitting."

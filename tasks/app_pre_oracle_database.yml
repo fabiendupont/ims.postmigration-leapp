@@ -1,0 +1,29 @@
+---
+- name: remove uname26 (conflicts)
+  yum:
+    name: uname26
+    state: absent
+
+- name: keep package
+  lineinfile:
+    path: /etc/leapp/transaction/to_keep
+    line: 'compat-libcap1'
+    state: present
+
+- name: keep package
+  lineinfile:
+    path: /etc/leapp/transaction/to_keep
+    line: 'compat-libstdc++-33'
+    state: present
+
+- name: keep package
+  lineinfile:
+    path: /etc/leapp/transaction/to_keep
+    line: 'oracle-database-xe-18c'
+    state: present
+
+- name: keep package
+  lineinfile:
+    path: /etc/leapp/transaction/to_keep
+    line: 'oracle-database-preinstall-18c'
+    state: present

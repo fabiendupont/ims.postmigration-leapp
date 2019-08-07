@@ -1,0 +1,145 @@
+---
+- name: Assert Leapp requirements
+  import_tasks: leapp_requirements.yml
+
+- name: Create snapshot before upgrade
+  include_role:
+    name: "ims.manageiq_vm_snapshot"
+  vars:
+    role_action: "create"
+    snapshot_name: "Before leapp"
+    snapshot_mode: "cold"
+
+- block:
+  - name: Ensure yum-plugin-versionlock package is installed
+    yum:
+      name:
+        - yum-plugin-versionlock
+      state: present
+
+  - name: Clear current version lock
+    command: yum versionlock clear
+    args:
+      warn: false
+
+  - name: Lock system to version 7.6
+    command: subscription-manager release --set 7.6
+
+  - name: Clear yum cache
+    command: yum clean all
+    args:
+      warn: false
+
+  - name: Update operating system
+    yum:
+      name:
+        - '*'
+      state: latest
+
+  - name: Reboot machine with a 15 minutes timeout
+    reboot:
+      reboot_timeout: 900
+
+  - name: Enable rhel-7-server-extras-rpms repository
+    rhsm_repository:
+      name: "rhel-7-server-extras-rpms"
+      state: enabled
+
+  - name: Install leapp package
+    yum:
+      name:
+        - leapp
+      state: present
+
+  - name: Download Leapp data archive
+    get_url:
+      url: "{{ leap_data_url }}"
+      dest: /tmp/leapp_data.tar.gz
+      validate_certs: false
+
+  - name: Extract PES events and repository mapping files
+    unarchive:
+      src: "{{ leap_data_url }}"
+      dest: /etc/leapp/files/
+      remote_src: true
+      validate_certs: false
+      extra_opts:
+        - pes-events.json
+        - repomap.csv
+
+  - fail:
+      msg: "KABOOM!"
+
+#  - name: Download repository mappings
+#    unarchive:
+#      # url: https://gitlab.cee.redhat.com/leapp/oamg-rhel7-vagrant/raw/master/roles/init/files/leapp-data/repomap.csv
+#      dest: /etc/leapp/files/repomap.csv
+#      validate_certs: false
+
+  - name: Run application specific pre-upgrade tasks
+    include_tasks: "app_pre_{{ app_name }}.yml"
+    when:
+      - "app_name is defined"
+
+  - name: Launch leapp asynchronously
+    command: leapp upgrade --debug
+    async: "{{ leapp_timeout }}"
+    poll: 0
+    register: leap_async
+
+  - name: Check if conversion is finished
+    async_status:
+      jid: "{{ leap_async.ansible_job_id }}"
+    register: job_result
+    until: job_result.finished
+    retries: "{{ ( leapp_timeout / leapp_retry_interval ) | int }}"
+    delay: "{{ leap_retry_interval }}"
+
+  - name: Update the Python interpreter to python3
+    set_fact:
+      ansible_python_interpreter: "/usr/bin/python3"
+
+  - name: Reboot machine with a 15 minutes timeout
+    reboot:
+      reboot_timeout: 900
+
+  - name: Set SELinux to enforcing mode
+    selinux:
+      state: enforcing
+    register: selinux_out
+
+  - name: Check if reboot is required after SELinux change
+    set_fact:
+      reboot_required: true
+    when:
+      - "selinux_out.reboot_required"
+
+  - name: Re-enable firewalld
+    service:
+      name: firewalld
+      enabled: true
+      state: started
+
+  - name: Reboot machine with a 15 minutes timeout
+    reboot:
+      reboot_timeout: 900
+    when:
+      - "reboot_required"
+
+  - name: Unset the system lock
+    command: subscription-manager release --unset
+
+  - name: Run application specific post-upgrade tasks
+    include_tasks: "app_post_{{ app_name }}.yml"
+    when:
+      - "app_name is defined"
+
+  rescue:
+    - name: Revert snapshot to previous state
+      include_role:
+        name: "ims.manageiq_vm_snapshot"
+      vars:
+        role_action: "revert"
+        snapshot_name: "Before leapp"
+        snapshot_mode: "cold"
+        snapshot_delete_after_revert: true
